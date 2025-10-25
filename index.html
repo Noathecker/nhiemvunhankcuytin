@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Nhiệm vụ # - Realtime Database 100%</title>
+  <style>
+    body{font-family:system-ui,Segoe UI,Roboto,Arial;max-width:1000px;margin:20px auto;padding:0 16px;background:#0b0b0b;color:#fff}
+    header{display:flex;justify-content:space-between;align-items:center}
+    .card{border:1px solid #ffcc00;padding:16px;border-radius:8px;margin-top:12px;background:#141414}
+    button{padding:8px 12px;border-radius:6px;border:none;background:#ffcc00;font-weight:600;cursor:pointer}
+    button:hover{background:#ff9900}
+    .hidden{display:none}
+    img{max-width:220px;border-radius:6px;display:block;margin-top:8px}
+    .row{display:flex;gap:12px;flex-wrap:wrap}
+    input, textarea {width:100%;padding:8px;margin-top:6px;border-radius:6px;border:none;background:#222;color:#fff}
+    .status{margin-top:8px;color:#00ffcc;font-weight:700}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Làm nhiệm vụ nhận kc</h1>
+    <div id="user-area">
+      <span id="user-email"></span>
+      <button id="logoutBtn" class="hidden" style="margin-left:10px">Đăng xuất</button>
+    </div>
+  </header>
+
+  <div id="auth" class="card">
+    <h2>Đăng nhập / Đăng ký</h2>
+    <label>Email <input id="email" type="email"></label>
+    <label>Mật khẩu <input id="password" type="password"></label>
+    <div class="row">
+      <button id="btn-login">Đăng nhập</button>
+      <button id="btn-register">Đăng ký</button>
+    </div>
+    <p id="auth-msg" style="color:crimson"></p>
+  </div>
+
+  <div id="task-area" class="card hidden">
+    <h2>Nhiệm vụ của bạn</h2>
+    <div id="task-list"></div>
+  </div>
+
+  <div id="admin-area" class="card hidden">
+    <h2>Admin - Quản lý nhiệm vụ</h2>
+    <div class="card">
+      <h3>➕ Thêm nhiệm vụ mới</h3>
+      <input id="newTaskName" placeholder="Tên nhiệm vụ" type="text">
+      <textarea id="newTaskDesc" placeholder="Mô tả nhiệm vụ"></textarea>
+      <input id="taskPhone" placeholder="Nhập số điện thoại (tuỳ chọn)" type="tel">
+      <div class="row">
+        <label><input type="checkbox" id="requireUpload"> Yêu cầu upload ảnh</label>
+      </div>
+      <button id="addTaskBtn">Thêm nhiệm vụ</button>
+    </div>
+
+    <div class="card">
+      <h3>📸 Ảnh chờ duyệt</h3>
+      <div id="pendingUploads">Đang tải...</div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js'
+    import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js'
+    import { getDatabase, ref as dbRef, set, push, onValue, update } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js'
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyC8lJ6cW2CBRopaGG_IxaII99SinfscTNk",
+      authDomain: "shop-acc-f37a8.firebaseapp.com",
+      databaseURL: "https://shop-acc-f37a8-default-rtdb.firebaseio.com/",
+      projectId: "shop-acc-f37a8",
+      storageBucket: "shop-acc-f37a8.appspot.com",
+      messagingSenderId: "664910816617",
+      appId: "1:664910816617:web:18df39b55e3e34316609f8"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getDatabase(app);
+
+    const emailEl=document.getElementById('email');
+    const passEl=document.getElementById('password');
+    const btnLogin=document.getElementById('btn-login');
+    const btnRegister=document.getElementById('btn-register');
+    const authMsg=document.getElementById('auth-msg');
+    const logoutBtn=document.getElementById('logoutBtn');
+    const userEmailSpan=document.getElementById('user-email');
+    const taskListEl=document.getElementById('task-list');
+    const adminArea=document.getElementById('admin-area');
+    const pendingUploads=document.getElementById('pendingUploads');
+
+    btnLogin.onclick=async()=>{try{await signInWithEmailAndPassword(auth,emailEl.value.trim(),passEl.value);}catch(e){authMsg.textContent=e.message;}}; 
+    btnRegister.onclick=async()=>{try{await createUserWithEmailAndPassword(auth,emailEl.value.trim(),passEl.value);}catch(e){authMsg.textContent=e.message;}}; 
+    logoutBtn.onclick=async()=>{await signOut(auth);};
+
+    onAuthStateChanged(auth,user=>{
+      if(user){
+        document.getElementById('auth').classList.add('hidden');
+        userEmailSpan.textContent=user.email;
+        logoutBtn.classList.remove('hidden');
+        document.getElementById('task-area').classList.remove('hidden');
+        renderTasks(user.uid,user.email);
+        if(user.email==='danhnekk123@gmail.com'){adminArea.classList.remove('hidden');renderPending();}
+        else adminArea.classList.add('hidden');
+      }else{
+        document.getElementById('auth').classList.remove('hidden');
+        document.getElementById('task-area').classList.add('hidden');
+        adminArea.classList.add('hidden');
+        logoutBtn.classList.add('hidden');
+      }
+    });
+
+    function renderTasks(uid,email){
+      onValue(dbRef(db,'taskList'),snap=>{
+        const list=snap.val()||{};
+        taskListEl.innerHTML='';
+        Object.entries(list).forEach(([id,t])=>{
+          const card=document.createElement('div');card.className='card';
+          card.innerHTML=`<h3>${t.name}</h3><p>${t.desc}</p>`;
+          if(t.phone){
+            const call=document.createElement('button');
+            call.textContent='📞 Gọi '+t.phone;
+            call.onclick=()=>window.location.href='tel:'+t.phone;
+            card.append(call);
+          }
+          if(t.requireUpload){
+            const input=document.createElement('input');
+            input.type='file';input.accept='image/*';
+            const btn=document.createElement('button');
+            btn.textContent='📸 Upload ảnh';
+            const status=document.createElement('div');
+            status.className='status';status.textContent='Chưa upload';
+
+            const refUpload=dbRef(db,`uploads/${uid}/${id}`);
+            onValue(refUpload,s=>{
+              const v=s.val();if(!v)return;
+              const arr=Object.values(v).sort((a,b)=>b.time-a.time);
+              const latest=arr[0];
+              if(latest.status==='pending')status.textContent='📤 Đã upload — chờ duyệt';
+              else if(latest.status==='approved')status.textContent='✅ Hoàn thành nhiệm vụ';
+              else if(latest.status==='rejected')status.textContent='❌ Ảnh bị từ chối';
+            });
+
+            btn.onclick=()=>{
+              const file=input.files[0];
+              if(!file){alert('Chưa chọn ảnh');return;}
+              const reader=new FileReader();
+              reader.onload=()=>{
+                const base64=reader.result;
+                const data={image:base64,file:file.name,email,status:'pending',time:Date.now()};
+                set(push(dbRef(db,`uploads/${uid}/${id}`)),data);
+                status.textContent='📤 Đã upload — chờ admin duyệt';
+                alert('✅ Ảnh đã được tải lên!');
+              };
+              reader.readAsDataURL(file);
+            };
+            card.append(input,btn,status);
+          }
+          taskListEl.append(card);
+        });
+      });
+    }
+
+    document.getElementById('addTaskBtn').onclick=async()=>{
+      const name=document.getElementById('newTaskName').value.trim();
+      const desc=document.getElementById('newTaskDesc').value.trim();
+      const phone=document.getElementById('taskPhone').value.trim();
+      const up=document.getElementById('requireUpload').checked;
+      if(!name||!desc)return alert('Điền đầy đủ thông tin');
+      await push(dbRef(db,'taskList'),{name,desc,phone:phone||null,requireUpload:up});
+      alert('✅ Đã thêm nhiệm vụ');
+      document.getElementById('newTaskName').value='';
+      document.getElementById('newTaskDesc').value='';
+      document.getElementById('taskPhone').value='';
+      document.getElementById('requireUpload').checked=false;
+    };
+
+    function renderPending(){
+      onValue(dbRef(db,'uploads'),snap=>{
+        const val=snap.val()||{};
+        pendingUploads.innerHTML='';
+        const list=[];
+        Object.entries(val).forEach(([uid,tasks])=>{
+          Object.entries(tasks).forEach(([tid,up])=>{
+            Object.entries(up).forEach(([id,u])=>{
+              if(u.status==='pending')list.push({uid,tid,id,u});
+            });
+          });
+        });
+        if(!list.length){pendingUploads.innerHTML='<p>Không có ảnh chờ duyệt</p>';return;}
+        list.sort((a,b)=>b.u.time-a.u.time);
+        list.forEach(it=>{
+          const c=document.createElement('div');c.className='card';
+          c.innerHTML=`<h4>${it.u.email}</h4><img src='${it.u.image}'><p>${it.u.file}</p><p>${new Date(it.u.time).toLocaleString()}</p>`;
+          const ok=document.createElement('button');ok.textContent='✅ Duyệt';
+          const no=document.createElement('button');no.textContent='❌ Từ chối';
+          ok.onclick=async()=>{await update(dbRef(db,`uploads/${it.uid}/${it.tid}/${it.id}`),{status:'approved'});alert('Đã duyệt ảnh');};
+          no.onclick=async()=>{await update(dbRef(db,`uploads/${it.uid}/${it.tid}/${it.id}`),{status:'rejected'});alert('Đã từ chối');};
+          c.append(ok,no);
+          pendingUploads.append(c);
+        });
+      });
+    }
+  </script>
+</body>
+</html>
